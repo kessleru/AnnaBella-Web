@@ -6,7 +6,7 @@
  * Sem dependências. Todo texto de terminal nas cenas lá embaixo é cópia de uma
  * execução real — se a saída mudar, cole a nova e rode de novo.
  */
-import { writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 const SAIDA = import.meta.dirname;
@@ -130,7 +130,7 @@ ${linhasSvg(linhas, { x: 20, y0: +(44 + alturaLinha * 0.75).toFixed(1), alturaLi
     </g>`;
 }
 
-function banner({ arquivo, titulo, tagline, stack, pills = [], cores, card, rotulo }) {
+function banner({ arquivo, titulo, tagline, stack, pills = [], cores, card, arte = '', defs = '', circulos = true, rotulo }) {
   const { de, ate, texto = '#ffffff', suave = 'rgba(255,255,255,.78)', circulo = '#ffffff', circuloOpacidade = 0.08 } = cores;
   const tamanhoTitulo = titulo.length > 16 ? 44 : 52;
 
@@ -163,11 +163,14 @@ function banner({ arquivo, titulo, tagline, stack, pills = [], cores, card, rotu
       <feDropShadow dx="0" dy="10" stdDeviation="16" flood-color="#000000" flood-opacity=".28"/>
     </filter>
     <clipPath id="recorte"><rect width="428" height="252" rx="18"/></clipPath>
+    <clipPath id="moldura"><rect width="1200" height="380" rx="24"/></clipPath>${defs}
   </defs>
 
   <rect width="1200" height="380" rx="24" fill="url(#bg)"/>
-  <circle cx="1105" cy="60" r="190" fill="${circulo}" opacity="${circuloOpacidade}"/>
-  <circle cx="110" cy="360" r="150" fill="${circulo}" opacity="${circuloOpacidade * 0.8}"/>
+${circulos ? `  <circle cx="1105" cy="60" r="190" fill="${circulo}" opacity="${circuloOpacidade}"/>
+  <circle cx="110" cy="360" r="150" fill="${circulo}" opacity="${circuloOpacidade * 0.8}"/>` : ''}
+  <g clip-path="url(#moldura)">${arte}
+  </g>
 
   <text x="72" y="148" font-family="${FONTE_UI}" font-size="${tamanhoTitulo}" font-weight="800" letter-spacing="-1" fill="${texto}">${escapar(titulo)}</text>
   <text x="74" y="196" font-family="${FONTE_UI}" font-size="24" font-weight="600" fill="${texto}">${escapar(tagline)}</text>
@@ -177,15 +180,38 @@ function banner({ arquivo, titulo, tagline, stack, pills = [], cores, card, rotu
     ${pillsSvg}
   </g>
 
-  <g transform="translate(700,64)">
+${card ? `  <g transform="translate(700,64)">
     <rect width="428" height="252" rx="18" fill="${card.fundo ?? '#ffffff'}" filter="url(#sombra)"/>
     <g clip-path="url(#recorte)">${card.conteudo}
     </g>
-  </g>
+  </g>` : ''}
 </svg>
 `;
   writeFileSync(join(SAIDA, arquivo), svg);
   console.log(`✓ ${arquivo}  (1200×380)`);
+}
+
+/**
+ * Embute um SVG do próprio repositório (logo, ícone) dentro do banner, na
+ * caixa x/y/largura/altura. Ids ganham prefixo para não colidirem entre si.
+ * `trocar` substitui cores literais (ex.: { white: '#1a1a1a' }).
+ */
+function svgArquivo(caminho, { x, y, largura, altura, trocar = {}, extra = '' }) {
+  let bruto = readFileSync(join(SAIDA, '..', '..', caminho), 'utf8')
+    .replace(/<\?xml[^>]*>/g, '')
+    .replace(/<!--[\s\S]*?-->/g, '');
+  const raiz = bruto.match(/<svg[ >][^>]*>/)[0];
+  const viewBox =
+    (raiz.match(/viewBox="([^"]+)"/) ?? [])[1] ??
+    `0 0 ${parseFloat(raiz.match(/width="([^"]+)"/)[1])} ${parseFloat(raiz.match(/height="([^"]+)"/)[1])}`;
+  const prefixo = caminho.replace(/[^a-z0-9]/gi, '');
+  let miolo = bruto.slice(bruto.indexOf(raiz) + raiz.length, bruto.lastIndexOf('</svg>'));
+  miolo = miolo
+    .replace(/id="([^"]+)"/g, `id="${prefixo}-$1"`)
+    .replace(/url\(#([^)]+)\)/g, `url(#${prefixo}-$1)`)
+    .replace(/href="#([^"]+)"/g, `href="#${prefixo}-$1"`);
+  for (const [de, para] of Object.entries(trocar)) miolo = miolo.split(`"${de}"`).join(`"${para}"`);
+  return `<svg x="${x}" y="${y}" width="${largura}" height="${altura}" viewBox="${viewBox}" ${extra}>${miolo.trim()}</svg>`;
 }
 
 // Atalhos ANSI para escrever as cenas
@@ -202,7 +228,14 @@ const _ = '\x1b[0m';
 // ---------------------------------------------------------------------
 // Cenas
 // ---------------------------------------------------------------------
-// Card: o CSS inteiro do site cabe em poucas regras (estilo.css) — este é o esqueleto.
+// Arte: a capa com os cantos 15px/50px do estilo.css, o menu das quatro páginas
+// e as fotos de campanha com a moldura bege — tudo nas cores da paleta.
+const moldura = (x, y, w, h, tom) => `
+    <rect x="${x}" y="${y}" width="${w}" height="${h}" fill="#c3c3ae"/>
+    <rect x="${x + 7}" y="${y + 7}" width="${w - 14}" height="${h - 14}" fill="${tom}"/>
+    <circle cx="${x + w * 0.62}" cy="${y + h * 0.42}" r="${h * 0.16}" fill="#e8e8d9" opacity=".55"/>
+    <path d="M${x + w * 0.44} ${y + h - 7}q${w * 0.18} ${-h * 0.42} ${w * 0.36} 0z" fill="#e8e8d9" opacity=".55"/>`;
+
 banner({
   arquivo: 'banner.svg',
   titulo: 'Anna Bella',
@@ -215,22 +248,23 @@ banner({
     { texto: 'Campanhas', fundo: 'rgba(232,232,217,.2)', cor: '#ffffff' },
     { texto: 'Contato', fundo: 'rgba(232,232,217,.2)', cor: '#ffffff' },
   ],
-  card: {
-    fundo: '#0d1117',
-    conteudo: cardTerminal({
-      titulo: 'estilo.css',
-      linhas: [
-        `${am}#img-capa${_} {`,
-        `  ${mg}border-radius${_}: ${c}15px 50px${_};`,
-        `}`,
-        `${am}#principal${_} {`,
-        `  ${mg}width${_}: ${c}900px${_};`,
-        `  ${mg}margin${_}: ${c}10px auto${_};`,
-        `}`,
-        `${am}.img-campanha${_} {`,
-        `  ${mg}border${_}: ${c}10px solid #c3c3ae${_};`,
-        `}`,
-      ],
-    }),
-  },
+  defs: `
+    <linearGradient id="capa" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#f5f1dc"/>
+      <stop offset="55%" stop-color="#b9b48f"/>
+      <stop offset="100%" stop-color="#5d5a44"/>
+    </linearGradient>`,
+  arte: `
+  <g transform="translate(716,40)" filter="url(#sombra)">
+    <path d="M15 0H380a50 50 0 0 1 50 50V120a15 15 0 0 1-15 15H50A50 50 0 0 1 0 85V15A15 15 0 0 1 15 0z" fill="url(#capa)"/>
+    <path d="M28 22v70M28 22h150" stroke="#8f8b6c" stroke-width="1.5" fill="none"/>
+    <text x="52" y="72" font-family="'Brush Script MT','Segoe Script',cursive" font-size="44" fill="#5b573f">Anna Bella</text>
+    <text x="196" y="94" font-family="Arial,sans-serif" font-size="14" font-weight="700" fill="#7a7658">modelo</text>
+    <rect y="146" width="430" height="30" rx="8" fill="#c5c5b2"/>
+    <text x="215" y="166" text-anchor="middle" font-family="Arial,sans-serif" font-size="12" font-weight="700" fill="#000000">HOME  |  BIOGRAFIA  |  CAMPANHAS  |  CONTATO</text>
+    <rect y="186" width="430" height="120" rx="8" fill="#e8e8d9"/>
+    ${moldura(14, 198, 124, 96, '#6f6d5a')}
+    ${moldura(153, 198, 124, 96, '#8c8a72')}
+    ${moldura(292, 198, 124, 96, '#56543f')}
+  </g>`,
 });
